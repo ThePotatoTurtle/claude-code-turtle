@@ -336,6 +336,7 @@ export const register: Register = on => {
   let turnStartedAt: number | undefined
   let callTimes: number[] = []
   let paceTimer: Timer | undefined
+  let clockTimer: Timer | undefined
   let reactTimer: Timer | undefined
 
   // Between turns
@@ -367,6 +368,14 @@ export const register: Register = on => {
     wokeAt = undefined
 
     return undefined
+  }
+
+  // Off to sleep, at the start of the band where the sleeping card draws him, so that is
+  // where he is when he wakes (no frame of him at the spot the last turn ended).
+  const nap = () => {
+    mood = { kind: 'sleepy', note: '' }
+    pos = 0
+    lastAt = Date.now()
   }
 
   // Carry the desktop walk on from where the turtle is now.
@@ -412,7 +421,7 @@ export const register: Register = on => {
 
     idleTimer?.cancel()
     idleTimer = $.clock.after(SLEEPY_AFTER_MS, () => {
-      mood = { kind: 'sleepy', note: 'resting until you need him' }
+      nap()
       $.ui.invalidate('ui.render')
     })
 
@@ -463,16 +472,19 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', async ($, e, next) => {
-    await update($, isGreeted, () => true).catch(() => {})
-
-    // Wake up. From a nap he gets up first: legs out, then a hop, then he walks.
+    // Wake up, before anything can redraw him. From a nap he gets up first: legs out, then a
+    // hop, then he walks, from the start of the band where he slept.
     if (mood?.kind === 'sleepy') {
       wokeAt = Date.now()
+      pos = 0
+      lastAt = wokeAt
     }
     idleTimer?.cancel()
     idleTimer = undefined
     moodTimer?.cancel()
     mood = undefined
+
+    await update($, isGreeted, () => true).catch(() => {})
 
     return next(e)
   }).catch(($, e, next) => next(e)) // a fault of the turtle's never holds up a prompt
@@ -492,8 +504,7 @@ export const register: Register = on => {
       pace = PACES[0]!
       mode = 'walk'
 
-      // Every 5 seconds: settle the pace, and after ten seconds show how long
-      // he has been walking in the status line.
+      // Every 5 seconds: settle the pace.
       paceTimer?.cancel()
       paceTimer = $.clock.every(5000, () => {
         if (turnStartedAt === undefined) {
@@ -506,7 +517,14 @@ export const register: Register = on => {
           setWalk(settled, 'walk')
           $.ui.invalidate('ui.render')
         }
+      })
 
+      // Every second, after the first ten: how long he has been walking, in the status line.
+      clockTimer?.cancel()
+      clockTimer = $.clock.every(1000, () => {
+        if (turnStartedAt === undefined) {
+          return
+        }
         const elapsed = Date.now() - turnStartedAt
 
         if (elapsed >= PACE_STATUS_AFTER_MS) {
@@ -524,6 +542,8 @@ export const register: Register = on => {
     if (e.agentId === undefined) {
       paceTimer?.cancel()
       paceTimer = undefined
+      clockTimer?.cancel()
+      clockTimer = undefined
       reactTimer?.cancel()
       turnStartedAt = undefined
       callStarts.clear()
@@ -548,7 +568,7 @@ export const register: Register = on => {
       // Left alone long enough, he tucks in for a nap.
       idleTimer?.cancel()
       idleTimer = $.clock.after(SLEEPY_AFTER_MS, () => {
-        mood = { kind: 'sleepy', note: 'resting until you need him' }
+        nap()
         $.ui.invalidate('ui.render')
       })
 
@@ -685,12 +705,16 @@ export const register: Register = on => {
       const card = (source: string, alt: string, title: string, note: string, titleColor = WALNUT, width = 16 * PX) => (
         <Box flexDirection="row" alignItems="center" gap={2} paddingLeft={1}>
           <Svg source={source} alt={alt} width={width} height={BAND_H} />
-          <Box flexDirection="column">
-            <Text color={titleColor} bold>
-              {title}
-            </Text>
-            <Text color={MUTED}>{note}</Text>
-          </Box>
+          {(title !== '' || note !== '') && (
+            <Box flexDirection="column">
+              {title !== '' && (
+                <Text color={titleColor} bold>
+                  {title}
+                </Text>
+              )}
+              {note !== '' && <Text color={MUTED}>{note}</Text>}
+            </Box>
+          )}
         </Box>
       )
 
@@ -703,7 +727,7 @@ export const register: Register = on => {
       }
 
       if (mood?.kind === 'sleepy') {
-        return card(ASLEEP_SVG, 'A pixel turtle asleep, chin on the ground', 'z z z', mood.note, MUTED, 20 * PX)
+        return card(ASLEEP_SVG, 'A pixel turtle asleep, chin on the ground', '', '', MUTED, 20 * PX)
       }
 
       if (await read($, isGreeted)) {
@@ -747,6 +771,10 @@ export const register: Register = on => {
       const to = Math.min(WIDTH, columns - offset)
       // Waking from a nap: legs out, then standing, before the first step.
       const wake = waking(Date.now())
+
+      if (wake !== undefined) {
+        step = WIDTH + 2 // two columns in, where the sleeping card drew him
+      }
       const rows = wake === 'rise' ? RISING : wake === 'hop' ? TURTLE : mode === 'hide' ? TUCKED : STRIDE[step % 4]!
       const word = mode === 'hop' ? ' ✓' : mode === 'hide' ? ' ✗' : ''
       const hasWord = word !== '' && to === WIDTH && offset + WIDTH + 2 < columns
@@ -810,7 +838,7 @@ export const register: Register = on => {
     }
 
     if (mood?.kind === 'sleepy') {
-      return card(ASLEEP, 'z z z', mood.note, MUTED)
+      return card(ASLEEP, '', '', MUTED) // asleep: the drawing alone, no words
     }
 
     if (await read($, isGreeted)) {
