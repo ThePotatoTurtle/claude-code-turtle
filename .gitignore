@@ -1,0 +1,9 @@
+# Written by Claude Code on each machine when the plugin loads
+.claude-plugin/types/
+
+# Compiled copy of hooks/register.tsx; the .tsx is what loads
+hooks/register.js
+
+node_modules/
+.DS_Store
+Thumbs.db

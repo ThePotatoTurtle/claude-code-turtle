@@ -1,0 +1,14 @@
+{
+  "name": "turtle",
+  "owner": {
+    "name": "ThePotatoTurtle"
+  },
+  "plugins": [
+    {
+      "name": "turtle",
+      "source": "./",
+      "description": "A forest-and-walnut look for the terminal and apps, with a pixel turtle who walks while Claude works, hops when tests pass and naps when idle"
+    }
+  ],
+  "description": "The turtle plugin for Claude Code."
+}
