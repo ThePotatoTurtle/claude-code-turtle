@@ -8,7 +8,7 @@ A Claude Code plugin: a forest-and-walnut look, and a small pixel turtle who kee
 - **Walks faster when Claude is busy.** Three or more tool calls in 30 seconds and he picks up the pace; six or more and he hurries.
 - **Hops when a check passes** and hides in his shell when one fails. A check is any command that tests, builds, lints or type-checks.
 - **Celebrates when a turn finishes**, with how long it took. If the turn was stopped, he tucks in.
-- **Naps** after five minutes with nothing happening, and wakes when you send a message.
+- **Naps** after three minutes with nothing happening, flopped on the ground with his chin down. He wakes when you send a message: legs out, a little hop, then off he walks.
 - **Keeps time.** After 10 seconds of a turn, the status line shows how long he has been walking.
 - **Waits with long tool calls.** Any call running over 5 seconds gets a "still going" line under it.
 - **Makes a soft plop** when a turn finishes.

@@ -17,7 +17,7 @@ const PIXELS = [
   '..GG.....GG.....',
 ]
 
-// Tucked into the shell: no head, no legs. Used when hiding and when asleep.
+// Tucked into the shell: no head, no legs. Used when hiding (a failed check, a stopped turn).
 const TUCKED_PIXELS = [
   '....LLLLSS......',
   '..LLLLSSSSSS....',
@@ -29,6 +29,36 @@ const TUCKED_PIXELS = [
   '.GGGGGGGGGGG....',
   '................',
   '................',
+]
+
+// Asleep, flopped (the same drawing as leonlin.ca): legs tucked, belly on the ground,
+// chin resting, eye closed.
+const ASLEEP_PIXELS = [
+  '................',
+  '................',
+  '....LLLLSS......',
+  '..LLLLSSSSSS....',
+  '.LLLSSSSSSSSS...',
+  '.LLSSSSSSSSSS...',
+  'LSSSSSSSSSSSS...',
+  'SSSSSSSSSSSSD.GG',
+  'DDDDDDDDDDDDDGFG',
+  '.GGGGGGGGGGGGGGG',
+]
+
+// Waking: chin still down, eye open, legs out under him. Shown for one beat before he
+// stands and hops.
+const RISING_PIXELS = [
+  '................',
+  '....LLLLSS......',
+  '..LLLLSSSSSS....',
+  '.LLLSSSSSSSSS...',
+  '.LLSSSSSSSSSS...',
+  'LSSSSSSSSSSSS...',
+  'SSSSSSSSSSSSD.GG',
+  'DDDDDDDDDDDDDGEG',
+  '.GGGGGGGGGGGGGGG',
+  '..GG.....GG.....',
 ]
 
 const COLORS: Record<string, string> = {
@@ -78,6 +108,8 @@ function turtleRows(pixels: string[]): Cell[][] {
 
 const TURTLE = turtleRows(PIXELS)
 const TUCKED = turtleRows(TUCKED_PIXELS)
+const ASLEEP = turtleRows(ASLEEP_PIXELS)
+const RISING = turtleRows(RISING_PIXELS)
 
 // The walk: a diagonal four-legged gait. Each leg plants ahead, slides back
 // under the shell as the body moves on (the sprite advances one column a beat,
@@ -189,6 +221,13 @@ const raisedSprite = (pixels: string[]) =>
 const STRIDE_SVG = [0, 1, 2, 3].map(beat => sprite(frame(beat)))
 const STRIDE_UP_SVG = [0, 1, 2, 3].map(beat => raisedSprite(frame(beat)))
 
+// Asleep: the flopped turtle with three z's drifting up from his head, as on leonlin.ca
+// (3.1 s each, a third apart). The image is wider than the turtle to give them room.
+const ASLEEP_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="${20 * PX}" height="${BAND_H}" viewBox="0 -2 20 12" shape-rendering="crispEdges"><style>.z{opacity:0;animation:z 3.12s ease-in infinite;font:3px Georgia,serif;fill:${MUTED}}.z2{animation-delay:1.04s}.z3{animation-delay:2.08s}@keyframes z{0%{opacity:0;transform:translate(0,0)}25%{opacity:.9}100%{opacity:0;transform:translate(2.5px,-5px)}}@media (prefers-reduced-motion:reduce){.z{animation:none;opacity:.8}.z2{transform:translate(1.2px,-2.5px)}.z3{transform:translate(2.4px,-5px)}}</style>${rects(ASLEEP_PIXELS)}<text class="z" x="15" y="6">z</text><text class="z z2" x="15" y="6">z</text><text class="z z3" x="15" y="6">z</text></svg>`
+const RISING_SVG = sprite(RISING_PIXELS)
+// The hop when he wakes: standing, then raised two pixels, in turn.
+const RAISED_SVG = raisedSprite(PIXELS)
+
 // ---- The look: colours for the desktop and mobile apps ----
 // The turtle's own palette, from leonlin.ca. Dark is the site itself: one deep forest
 // green for the page, cards and panels alike, so nothing sits in a lighter box, with
@@ -265,7 +304,10 @@ const CHECKS =
 const LONG_CALL_S = 5 // a tool call running this long gets a turtle beside it
 const HAPPY_MS = 4000
 const REACT_MS = 2600
-const SLEEPY_AFTER_MS = 5 * 60_000
+const SLEEPY_AFTER_MS = 3 * 60_000
+// Waking from a nap: legs out for one beat, then two little hops, then he walks.
+const WAKE_RISE_MS = 300
+const WAKE_HOP_MS = 880
 const PACE_STATUS_AFTER_MS = 10_000
 
 const span = (ms: number) => {
@@ -300,11 +342,32 @@ export const register: Register = on => {
   let mood: Mood | undefined
   let moodTimer: Timer | undefined
   let idleTimer: Timer | undefined
+  // When he last woke from a nap, for the wake-up before he walks
+  let wokeAt: number | undefined
   let isSoundOn = true
   let isThemeOn = true
 
   // Long tool calls
   const callStarts = new Map<string, number>()
+
+  // Where the wake-up is: 'rise', 'hop', or undefined once he is walking.
+  const waking = (now: number) => {
+    if (wokeAt === undefined) {
+      return undefined
+    }
+    const t = now - wokeAt
+
+    if (t < WAKE_RISE_MS) {
+      return 'rise' as const
+    }
+
+    if (t < WAKE_RISE_MS + WAKE_HOP_MS) {
+      return 'hop' as const
+    }
+    wokeAt = undefined
+
+    return undefined
+  }
 
   // Carry the desktop walk on from where the turtle is now.
   const settle = () => {
@@ -402,7 +465,10 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     await update($, isGreeted, () => true).catch(() => {})
 
-    // Wake up.
+    // Wake up. From a nap he gets up first: legs out, then a hop, then he walks.
+    if (mood?.kind === 'sleepy') {
+      wokeAt = Date.now()
+    }
     idleTimer?.cancel()
     idleTimer = undefined
     moodTimer?.cancel()
@@ -579,9 +645,26 @@ export const register: Register = on => {
           walk = $.clock.every(TICK_MS, () => $.ui.invalidate('ui.render'))
         }
 
+        const now = Date.now()
+        const wake = waking(now)
+
+        if (wake !== undefined) {
+          // He stays at the start of the band until he is up.
+          lastAt = now
+          const up = wake === 'hop' && Math.floor((now - wokeAt! - WAKE_RISE_MS) / 220) % 2 === 0
+          const wakeSource = wake === 'rise' ? RISING_SVG : up ? RAISED_SVG : STILL_SVG
+
+          return (
+            <Box flexDirection="row" width="100%" alignItems="center">
+              <Box flexGrow={Math.round(pos * 1000)} />
+              <Svg source={wakeSource} alt="A small pixel turtle waking up" width={16 * PX} height={BAND_H} />
+              <Box flexGrow={1000 - Math.round(pos * 1000)} />
+            </Box>
+          )
+        }
+
         settle()
 
-        const now = Date.now()
         const beat = Math.floor(now / ((300 * pace.crossS) / 20)) % 4
         const isUp = mode === 'hop' && Math.floor(now / 220) % 2 === 0
         const source = mode === 'hide' ? TUCKED_SVG : (isUp ? STRIDE_UP_SVG : STRIDE_SVG)[beat]!
@@ -599,9 +682,9 @@ export const register: Register = on => {
       walk?.cancel()
       walk = undefined
 
-      const card = (source: string, alt: string, title: string, note: string, titleColor = WALNUT) => (
+      const card = (source: string, alt: string, title: string, note: string, titleColor = WALNUT, width = 16 * PX) => (
         <Box flexDirection="row" alignItems="center" gap={2} paddingLeft={1}>
-          <Svg source={source} alt={alt} width={16 * PX} height={BAND_H} />
+          <Svg source={source} alt={alt} width={width} height={BAND_H} />
           <Box flexDirection="column">
             <Text color={titleColor} bold>
               {title}
@@ -620,7 +703,7 @@ export const register: Register = on => {
       }
 
       if (mood?.kind === 'sleepy') {
-        return card(TUCKED_SVG, 'A pixel turtle asleep in its shell', 'z z z', mood.note, MUTED)
+        return card(ASLEEP_SVG, 'A pixel turtle asleep, chin on the ground', 'z z z', mood.note, MUTED, 20 * PX)
       }
 
       if (await read($, isGreeted)) {
@@ -650,7 +733,7 @@ export const register: Register = on => {
         walk?.cancel()
         walkMs = pace.stepMs
         walk = $.clock.every(walkMs, () => {
-          if (mode !== 'hide') {
+          if (mode !== 'hide' && waking(Date.now()) === undefined) {
             step += 1
           }
           $.ui.invalidate('ui.render')
@@ -662,7 +745,9 @@ export const register: Register = on => {
       const offset = (step % (columns + WIDTH)) - WIDTH
       const from = Math.max(0, -offset)
       const to = Math.min(WIDTH, columns - offset)
-      const rows = mode === 'hide' ? TUCKED : STRIDE[step % 4]!
+      // Waking from a nap: legs out, then standing, before the first step.
+      const wake = waking(Date.now())
+      const rows = wake === 'rise' ? RISING : wake === 'hop' ? TURTLE : mode === 'hide' ? TUCKED : STRIDE[step % 4]!
       const word = mode === 'hop' ? ' ✓' : mode === 'hide' ? ' ✗' : ''
       const hasWord = word !== '' && to === WIDTH && offset + WIDTH + 2 < columns
 
@@ -725,7 +810,7 @@ export const register: Register = on => {
     }
 
     if (mood?.kind === 'sleepy') {
-      return card(TUCKED, 'z z z', mood.note, MUTED)
+      return card(ASLEEP, 'z z z', mood.note, MUTED)
     }
 
     if (await read($, isGreeted)) {

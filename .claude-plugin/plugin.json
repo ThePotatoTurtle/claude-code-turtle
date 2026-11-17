@@ -1,6 +1,6 @@
 {
   "name": "turtle",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "A forest-and-walnut look for the terminal and apps, with a pixel turtle who walks while Claude works, hops when tests pass and naps when idle",
   "types": "./types/index.d.ts"
 }
